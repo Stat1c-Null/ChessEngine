@@ -10,19 +10,19 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 
-def LoadingTrainingData(FRACTION_OF_DATA = 1, BATCH_SIZE = 32):
+def LoadingTrainingData(FRACTION_OF_DATA = 1, BATCH_SIZE = 64):
     #loading training data
 
     allMoves = []
     allBoards = []
 
-    files = (glob.glob(r"../data/preparedData/moves*.npy"))
+    files = (glob.glob(r"Z:/Coding/GitHub/Python/ChessEngine/data/preparedData/moves*.npy"))
 
     for f in files:
         currUuid = f.split("moves")[-1].split(".npy")[0]
         try:
-            moves = np.load(f"../data/preparedData/moves{currUuid}.npy", allow_pickle=True)
-            boards = np.load(f"../data/preparedData/positions{currUuid}.npy", allow_pickle=True)
+            moves = np.load(f"Z:/Coding/GitHub/Python/ChessEngine/data/preparedData/moves{currUuid}.npy", allow_pickle=True)
+            boards = np.load(f"Z:/Coding/GitHub/Python/ChessEngine/data/preparedData/positions{currUuid}.npy", allow_pickle=True)
             if (len(moves) != len(boards)):
                 print("ERROR ON i = ", currUuid, len(moves), len(boards))
             allMoves.extend(moves)
@@ -174,7 +174,7 @@ def train_one_epoch(model, optimizer, loss_fn, epoch_index, tb_writer, training_
 
 def createBestModelFile():
     #first find best model if it exists:
-    path = Path('../data/savedModels/bestModel.txt')
+    path = Path('Z:/Coding/GitHub/Python/ChessEngine/data/savedModels/bestModel.txt')
 
     if not (path.is_file()):
         #create the files
@@ -184,7 +184,7 @@ def createBestModelFile():
         f.close()
 
 def saveBestModel(vloss, pathToBestModel, epoch_number):
-    f = open("../data/savedModels/bestModel.txt", "w")
+    f = open("Z:/Coding/GitHub/Python/ChessEngine/data/savedModels/bestModel.txt", "w")
     f.write(str(vloss.item()))
     f.write("\n")
     f.write(pathToBestModel)
@@ -192,13 +192,13 @@ def saveBestModel(vloss, pathToBestModel, epoch_number):
 
 
 def retrieveBestModelInfo():
-    f = open('../data/savedModels/bestModel.txt', "r")
+    f = open('Z:/Coding/GitHub/Python/ChessEngine/data/savedModels/bestModel.txt', "r")
     bestLoss = float(f.readline())
     bestModelPath = f.readline()
     f.close()
     return bestLoss, bestModelPath
 #hyperparams
-EPOCHS = 500
+EPOCHS = 6
 LEARNING_RATE = 0.001
 MOMENTUM = 0.9
 
@@ -218,6 +218,11 @@ def runTraining():
     optimizer = torch.optim.SGD(model.parameters(), lr=LEARNING_RATE, momentum=MOMENTUM)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model.to(device)
+
+    if torch.cuda.is_available():
+        print("Using GPU")
+    else:
+        print("Using CPU")
 
     best_vloss = 1_000_000.
 

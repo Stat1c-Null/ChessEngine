@@ -22,13 +22,13 @@ def saveData(moves, positions):
 	movesAndPositions = np.concatenate((moves, positions), axis = 1)
 
 	nextUuid = uuid.uuid4()
-	np.save(f"../data/rawData/movesAndPositions{nextUuid}.npy", movesAndPositions)
+	np.save(f"../../data/rawData/movesAndPositions{nextUuid}.npy", movesAndPositions)
 	print(f"Saved successfully as ../data/rawData/movesAndPositions{nextUuid}.npy")
 
 
 def runGame(numMoves, index = 0):
 	"""run a game you stored"""
-	raw_data_dir = "../data/rawdata"
+	raw_data_dir = "../../data/rawData"
 	filesByLastmod = sorted(filter(os.path.isfile, glob.glob(raw_data_dir + '/*.npy')), key = os.path.getmtime)
 	filename = filesByLastmod[index]
 	testing = np.load(filename)
@@ -197,7 +197,7 @@ def encodeMove(move: str, board) -> int:
     return action
 
 def encodeBoard(board: chess.Board) -> np.array:
-    """Converts a board to numpy array representation."""
+    """Converts a board to numpy array representation. Board encoding for Fully Connected/Dense Network"""
 
     array = np.zeros((8, 8, 14), dtype=int)
 
@@ -243,7 +243,7 @@ def encodeAllMovesAndPositions():
     board.turn = False #set turn to black first, changed on first run
 
     #find all files in folder:
-    files = (glob.glob(r"../data/rawData/movesAndPositions*.npy"))
+    files = (glob.glob(r"../../data/rawData/movesAndPositions*.npy"))
     for f in files:
         movesAndPositions = np.load(f'{f}', allow_pickle=True)
         moves = movesAndPositions[:,0]
@@ -270,8 +270,8 @@ def encodeAllMovesAndPositions():
                     break
 
         currUuid = f.split("movesAndPositions")[-1].split(".npy")[0]
-        np.save(f'../data/preparedData/moves{currUuid}', np.array(encodedMoves))
-        np.save(f'../data/preparedData/positions{currUuid}', np.array(encodedPositions))
+        np.save(f'../../data/preparedData/moves{currUuid}', np.array(encodedMoves))
+        np.save(f'../../data/preparedData/positions{currUuid}', np.array(encodedPositions))
 
 #helper methods:
 

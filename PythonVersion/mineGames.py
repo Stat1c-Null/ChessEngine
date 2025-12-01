@@ -5,6 +5,7 @@ import chess, time, uuid, multiprocessing, random
 from stockfish import Stockfish
 import numpy as np
 import datetime
+import psutil
 
 # Helper functions
 def checkEndCondition(board):
@@ -23,7 +24,9 @@ def saveData(moves, positions):
   movesAndPositions = np.concatenate((moves, positions), axis=1)
 
   nextUuid = uuid.uuid4()
-  np.save(f"../data/rawData/movesAndPositions{nextUuid}.npy", movesAndPositions)
+
+  np.save(f"Z:/Coding/GitHub/Python/ChessEngine/data/rawData/movesAndPositions{nextUuid}.npy", movesAndPositions)
+  #np.save(f"../data/rawData/movesAndPositions{nextUuid}.npy", movesAndPositions)
   print(f"Saved successfully as ../data/rawData/movesAndPositions{nextUuid}.npy")
 
 # Main game-mining function
@@ -67,9 +70,15 @@ def mineGames(numGames: int, id: int):
 
 # Multiprocessing launcher
 if __name__ == "__main__":
+  core_count = psutil.cpu_count(logical=False)
+  print(f"Your cpu has {core_count} cores. When choosing number of cores to use, enter a number 1-2 cores lower than total amount, so you won't slow your pc down.")
+
+  num_processes = int(input("Enter total number of cores you would like to utilize: "))
+  total_games = int(input("Enter total number of games you want to mine: "))
+  
+
   start_time = time.time()
-  total_games = 3
-  num_processes = 1
+  
   games_per_process = total_games // num_processes
 
   processes = []

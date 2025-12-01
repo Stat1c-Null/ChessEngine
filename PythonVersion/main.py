@@ -7,8 +7,9 @@ from tkinter import messagebox
 import gym
 from stockfish import Stockfish
 
-from libs.Training import *
-stockfish = Stockfish(path=r"../stockfish/stockfish-windows-x86-64-avx2.exe")
+#from libs.Training import *
+from libs.CNNTraining import *
+stockfish = Stockfish(path=r"Z:\Chess\stockfish\stockfish-windows-x86-64-avx2.exe")
 env = gym.make('ChessAlphaZero-v0')
 env.reset()
 
@@ -66,7 +67,7 @@ def play_games():
     messagebox.showinfo("Info", f"Playing {games} games.")
 
 def show_total_games():
-    raw_data_dir = "../data/rawdata"  # Replace this with the path to your raw data directory
+    raw_data_dir = "Z:/Coding/GitHub/Python/ChessEngine/data/rawData"  # Replace this with the path to your raw data directory
     try:
         total_games = len(os.listdir(raw_data_dir))-1
         messagebox.showinfo("Info", f"Total games played: {total_games}")
@@ -105,18 +106,18 @@ def create_main_screen():
 
 if __name__ == "__main__":
     # create_main_screen()
-    user_input = input("Please enter an integer: ")
+    user_input = input("Please enter number of games you want to mine: ")
 
     try:
         # Convert the input to an integer
         user_integer = int(user_input)
-        print("You entered:", user_integer)
+        print("Mining ", user_integer, " games...")
         mineGames(user_integer)
         # Ask the user if they want to proceed with training
         train_input = input("Do you want to proceed with training? (yes/no): ").lower()
 
         if train_input == "yes":
-            encodeAllMovesAndPositions()
+            #encodeAllMovesAndPositions()
             runTraining()
         elif train_input == "no":
             print("Training will not proceed.")
