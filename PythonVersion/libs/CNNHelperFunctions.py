@@ -7,6 +7,18 @@ import uuid
 import os
 
 
+# ============= PIECE VALUES =============
+# Standard piece values used in chess
+PIECE_VALUES = {
+  chess.PAWN: 1.0,
+  chess.KNIGHT: 3.0,
+  chess.BISHOP: 3.0,
+  chess.ROOK: 5.0,
+  chess.QUEEN: 9.0,
+  chess.KING: 0.0  # King has no material value (game ends if lost)
+}
+
+
 #helper functions:
 def checkEndCondition(board):
   if (board.is_checkmate() or board.is_stalemate() or board.is_insufficient_material() or board.can_claim_threefold_repetition() or board.can_claim_fifty_moves() or board.can_claim_draw()):
@@ -196,23 +208,24 @@ def encodeMove(move: str, board) -> int:
 
 
 # ============= FIXED ENCODEBOARD FUNCTION =============
-# This is the KEY fix - returns shape (14, 8, 8) in correct format
+# This is the KEY fix - returns shape (15, 8, 8) in correct format
 def encodeBoard(board: chess.Board):
   """
   Encode chess board for CNN input
-  Returns: numpy array of shape (14, 8, 8)
+  Returns: numpy array of shape (15, 8, 8)
   
   Channels (dimension 0):
   0-5: White pieces (Pawn, Knight, Bishop, Rook, Queen, King)
   6-11: Black pieces (Pawn, Knight, Bishop, Rook, Queen, King)
   12: En passant target square
   13: Castling rights
+  14: Piece values (normalized material value at each square)
   
   CRITICAL: Returns (channels, height, width) for PyTorch Conv2D
   """
-  # Initialize 14 channels of 8×8 boards
-  # Shape: (14, 8, 8) - channels first!
-  encoded = np.zeros((14, 8, 8), dtype=np.float32)
+  # Initialize 15 channels of 8×8 boards
+  # Shape: (15, 8, 8) - channels first!
+  encoded = np.zeros((15, 8, 8), dtype=np.float32)
   
   piece_to_channel = {
     chess.PAWN: 0, 
@@ -257,6 +270,23 @@ def encodeBoard(board: chess.Board):
   if board.has_queenside_castling_rights(chess.BLACK):
     castling_value += 0.25
   encoded[13, :, :] = castling_value
+  
+  # Encode piece values (channel 14)
+  # Positive for white pieces, negative for black pieces
+  # Normalized by dividing by max piece value (9.0 for queen)
+  for square in chess.SQUARES:
+    piece = board.piece_at(square)
+    if piece:
+      rank = chess.square_rank(square)
+      file = chess.square_file(square)
+      value = PIECE_VALUES[piece.piece_type]
+      
+      # Normalize to [-1, 1] range
+      # White pieces: positive values, Black pieces: negative values
+      if piece.color == chess.WHITE:
+        encoded[14, rank, file] = value / 9.0  # Normalize by queen value
+      else:
+        encoded[14, rank, file] = -value / 9.0  # Negative for black
   
   return encoded
 
@@ -323,7 +353,7 @@ def encodeAllMovesAndPositions():
     
     # Verify shapes
     print(f"  Encoded {len(encodedMoves)} moves")
-    print(f"  Positions shape: {encodedPositions.shape}")  # Should be (N, 14, 8, 8)
+    print(f"  Positions shape: {encodedPositions.shape}")  # Should be (N, 15, 8, 8)
     
     # Save with same UUID
     currUuid = f.split("movesAndPositions")[-1].split(".npy")[0]

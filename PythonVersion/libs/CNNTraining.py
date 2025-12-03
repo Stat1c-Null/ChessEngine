@@ -5,7 +5,7 @@ from pathlib import Path
 import chess
 import numpy as np
 import torch
-from libs.HelperFunctions import *
+from libs.CNNHelperFunctions import *
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
@@ -16,8 +16,6 @@ import numpy as np
 
 
 def LoadingTrainingData(FRACTION_OF_DATA=1, BATCH_SIZE=64):
-  # loading training data
-
   allMoves = []
   allBoards = []
 
@@ -45,7 +43,6 @@ def LoadingTrainingData(FRACTION_OF_DATA=1, BATCH_SIZE=64):
 
   trainDataIdx = int(len(allMoves) * 0.8)
 
-  # NOTE transfer all data to GPU if available
   device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
   allBoards = torch.from_numpy(np.asarray(allBoards)).to(device)
   allMoves = torch.from_numpy(np.asarray(allMoves)).to(device)
@@ -54,8 +51,8 @@ def LoadingTrainingData(FRACTION_OF_DATA=1, BATCH_SIZE=64):
       allBoards[:trainDataIdx], allMoves[:trainDataIdx])
   test_set = torch.utils.data.TensorDataset(
       allBoards[trainDataIdx:], allMoves[trainDataIdx:])
+  
   # Create data loaders for our datasets; shuffle for training, not for validation
-
   training_loader = torch.utils.data.DataLoader(
       training_set, batch_size=BATCH_SIZE, shuffle=True)
   validation_loader = torch.utils.data.DataLoader(
@@ -70,8 +67,8 @@ class ChessCNN(torch.nn.Module):
   def __init__(self):
     super(ChessCNN, self).__init__()
     
-    # Input: (batch_size, 14, 8, 8)
-    # 14 channels: 6 piece types × 2 colors + 2 extra (en passant, castling, etc.)
+    # Input: (batch_size, 15, 8, 8)
+    # 15 channels: 6 piece types × 2 colors + en passant + castling + piece values
     # 8×8: chess board dimensions
     
     self.OUTPUT_SIZE = 4672  # Number of possible moves
@@ -80,11 +77,11 @@ class ChessCNN(torch.nn.Module):
     # These extract spatial features from the board
     
     # Conv Layer 1: Learn basic piece patterns
-    # Input: 14 channels → Output: 32 channels
+    # Input: 15 channels - Output: 32 channels (includes piece value channel)
     # Kernel size 3×3: looks at 3×3 squares at a time
-    # Padding=1: keeps the 8×8 size (adds border so edges aren't lost)
+    # Padding=1: keeps the 8×8 size
     self.conv1 = nn.Conv2d(
-      in_channels=14,    # Input channels (piece types)
+      in_channels=15,    # Input channels (piece types + values)
       out_channels=32,   # Output channels (learned features)
       kernel_size=3,     # 3×3 filter (looks at piece + neighbors)
       padding=1          # Keep 8×8 size
@@ -95,7 +92,7 @@ class ChessCNN(torch.nn.Module):
     self.bn1 = nn.BatchNorm2d(32)
     
     # Conv Layer 2: Learn more complex patterns
-    # Input: 32 channels → Output: 64 channels
+    # Input: 32 channels - Output: 64 channels
     # Now learning combinations of the features from conv1
     self.conv2 = nn.Conv2d(
       in_channels=32,
@@ -106,7 +103,7 @@ class ChessCNN(torch.nn.Module):
     self.bn2 = nn.BatchNorm2d(64)
     
     # Conv Layer 3: Even deeper patterns
-    # Input: 64 channels → Output: 128 channels
+    # Input: 64 channels - Output: 128 channels
     # Learning high-level strategic patterns (tactics, structure)
     self.conv3 = nn.Conv2d(
       in_channels=64,
@@ -121,16 +118,27 @@ class ChessCNN(torch.nn.Module):
     self.activation = nn.ReLU()
     
     # Dropout: Randomly "turns off" 30% of neurons during training
-    # Prevents overfitting (memorizing training data instead of learning patterns)
+    # Prevents overfitting
     self.dropout = nn.Dropout(0.3)
+    
+    # ============= MATERIAL EVALUATION LAYER (Optional) =============
+    # This layer specifically processes the piece value channel
+    # Helps the model learn strategic material evaluation
+    self.value_conv = nn.Conv2d(
+      in_channels=1,     # Only the piece value channel (channel 14)
+      out_channels=8,    # Learn 8 different value-based features
+      kernel_size=3,
+      padding=1
+    )
+    self.value_bn = nn.BatchNorm2d(8)
     
     # ============= FULLY CONNECTED LAYERS =============
     # After conv layers extract features, these make the final decision
     
     # After 3 conv layers with same size (due to padding=1):
-    # Output is still 8×8, but with 128 channels
-    # Flattened size: 128 × 8 × 8 = 8192
-    self.fc1 = nn.Linear(128 * 8 * 8, 1024)
+    # Output is still 8×8, but with 128 channels from main path + 8 from value path
+    # Flattened size: (128 + 8) × 8 × 8 = 8704
+    self.fc1 = nn.Linear((128 + 8) * 8 * 8, 1024)
     self.fc2 = nn.Linear(1024, 512)
     self.fc3 = nn.Linear(512, self.OUTPUT_SIZE)
     
@@ -138,16 +146,25 @@ class ChessCNN(torch.nn.Module):
     self.softmax = nn.Softmax(dim=1)
   
   def forward(self, x):
-    # x shape: (batch_size, 14, 8, 8)
+    # x shape: (batch_size, 15, 8, 8)
     
     # Ensure correct data type
     x = x.to(torch.float32)
     
-    # ============= CONVOLUTIONAL BLOCKS =============
+    # ============= SEPARATE VALUE CHANNEL PROCESSING =============
+    # Extract the piece value channel (channel 14) for dedicated processing
+    value_channel = x[:, 14:15, :, :]  # Shape: (batch, 1, 8, 8)
+    
+    # Process value channel through dedicated conv layer
+    value_features = self.value_conv(value_channel)  # (batch, 8, 8, 8)
+    value_features = self.value_bn(value_features)
+    value_features = self.activation(value_features)
+    
+    # ============= MAIN CONVOLUTIONAL BLOCKS =============
     # Each block: Conv → BatchNorm → Activation → Dropout
     
     # Block 1: Basic feature extraction
-    x = self.conv1(x)           # (batch, 32, 8, 8)
+    x = self.conv1(x)           # (batch, 32, 8, 8) - processes all 15 channels
     x = self.bn1(x)             # Normalize
     x = self.activation(x)      # Apply ReLU
     x = self.dropout(x)         # Prevent overfitting
@@ -164,9 +181,13 @@ class ChessCNN(torch.nn.Module):
     x = self.activation(x)
     x = self.dropout(x)
     
+    # ============= CONCATENATE VALUE FEATURES =============
+    # Combine main features with value-specific features
+    x = torch.cat([x, value_features], dim=1)  # (batch, 136, 8, 8)
+    
     # ============= FLATTEN & FULLY CONNECTED =============
     # Flatten: Convert 3D tensor to 1D for dense layers
-    x = x.reshape(x.shape[0], -1)  # (batch, 8192)
+    x = x.reshape(x.shape[0], -1)  # (batch, 8704)
     
     # Dense layers for final move prediction
     x = self.fc1(x)             # (batch, 1024)
@@ -189,10 +210,10 @@ class ChessCNN(torch.nn.Module):
     """
     with torch.no_grad():
       # Encode board - IMPORTANT: must match CNN input shape
-      # Should return shape (14, 8, 8), NOT flattened
-      encodedBoard = encodeBoard(board)  # You need to modify this!
+      # Should return shape (15, 8, 8), NOT flattened
+      encodedBoard = encodeBoard(board)  # Now includes piece values!
       
-      # Add batch dimension: (14, 8, 8) → (1, 14, 8, 8)
+      # Add batch dimension: (15, 8, 8) → (1, 15, 8, 8)
       encodedBoard = np.expand_dims(encodedBoard, axis=0)
       encodedBoard = torch.from_numpy(encodedBoard)
       
@@ -229,22 +250,16 @@ class ChessCNN(torch.nn.Module):
       print("No legal moves found")
       return None
 
-# helper functions for training
-
 
 def train_one_epoch(model, optimizer, loss_fn, epoch_index, tb_writer, training_loader):
   running_loss = 0.
   last_loss = 0.
 
-  # Here, we use enumerate(training_loader) instead of
-  # iter(training_loader) so that we can track the batch
-  # index and do some intra-epoch reporting
   for i, data in enumerate(training_loader):
 
-    # Every data instance is an input + label pair
     inputs, labels = data
 
-    # Zero your gradients for every batch!
+    # Zero gradients for every batch
     optimizer.zero_grad()
 
     # Make predictions for this batch
@@ -300,12 +315,14 @@ def retrieveBestModelInfo():
 
 
 # hyperparams
-EPOCHS = 50
-LEARNING_RATE = 0.0001
+EPOCHS = 300
+LEARNING_RATE = 0.0005
 MOMENTUM = 0.9
+EARLY_STOP_PATIENCE = 30  # Stop training if no improvement for 30 epochs
 
 
 def runTraining():
+  print("Training CNN model")
 
   createBestModelFile()
 
@@ -320,10 +337,21 @@ def runTraining():
   loss_fn = torch.nn.CrossEntropyLoss()
   optimizer = torch.optim.SGD(
       model.parameters(), lr=LEARNING_RATE, momentum=MOMENTUM)
+  
+  # Learning rate scheduler - reduces LR when validation loss plateaus
+  scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+      optimizer,
+      mode='min',           # Minimize validation loss
+      factor=0.5,           # Reduce LR by half
+      patience=15,          # Wait 15 epochs before reducing
+      min_lr=1e-6           # Don't go below this LR
+  )
+  
   device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
   model.to(device)
 
   best_vloss = 1_000_000.
+  epochs_without_improvement = 0  # Early stopping counter
 
   for epoch in tqdm(range(EPOCHS)):
     if (epoch_number % 5 == 0):
@@ -350,27 +378,45 @@ def runTraining():
         running_vloss += vloss
 
     avg_vloss = running_vloss / (i + 1)
+    
+    # Step the learning rate scheduler based on validation loss
+    scheduler.step(avg_vloss)
+    
+    # Get current learning rate for logging
+    current_lr = optimizer.param_groups[0]['lr']
 
-    # only print every 5 epochs
+    # Enhanced progress tracking - print every 5 epochs
     if epoch_number % 5 == 0:
-      print('LOSS train {} valid {}'.format(avg_loss, avg_vloss))
+      improvement = "" if avg_vloss >= best_vloss else " ✓ NEW BEST"
+      print('Epoch {:3d} | Train Loss: {:.6f} | Valid Loss: {:.6f} | LR: {:.2e}{}'.format(
+          epoch_number + 1, avg_loss, avg_vloss, current_lr, improvement))
 
     # Log the running loss averaged per batch
     # for both training and validation
     writer.add_scalars('Training vs. Validation Loss',
                        {'Training': avg_loss, 'Validation': avg_vloss},
                        epoch_number + 1)
+    writer.add_scalar('Learning Rate', current_lr, epoch_number + 1)
     writer.flush()
 
     # Track best performance, and save the model's state
     if avg_vloss < best_vloss:
       best_vloss = avg_vloss
+      epochs_without_improvement = 0  # Reset counter on improvement
 
       if (bestLoss > best_vloss):  # if better than previous best loss from all models created, save it
-        model_path = '../data/savedModels/model_{}_{}'.format(
+        model_path = 'Z:/Coding/GitHub/Python/ChessEngine/data/savedModels/model_{}_{}'.format(
             timestamp, epoch_number)
         torch.save(model.state_dict(), model_path)
         saveBestModel(best_vloss, model_path, epoch_number)
+        print(f"Saved new best model: {model_path}")
+    else:
+      epochs_without_improvement += 1
+      if epochs_without_improvement >= EARLY_STOP_PATIENCE:
+        print(f"\n\nEarly stopping triggered at epoch {epoch_number + 1}")
+        print(f"No improvement for {EARLY_STOP_PATIENCE} epochs")
+        print(f"Best validation loss: {best_vloss:.6f}")
+        break
 
     epoch_number += 1
 
